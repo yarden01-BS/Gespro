@@ -103,7 +103,7 @@ class MenuPrincipalApp(ctk.CTk):
 
     def ouvrir_paiements(self):
         self.destroy() # Ferme le menu
-        from paiement_app import GesProPaiementApp
+        from theme import GesProPaiementApp
         app = GesProPaiementApp()
         app.mainloop()
 
