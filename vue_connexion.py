@@ -1,6 +1,6 @@
 import customtkinter as ctk
 from tkinter import messagebox
-from config_db import obtenir_connexion
+import controleur_connexion
 import theme
 
 # Configuration globale de CustomTkinter
@@ -112,59 +112,11 @@ class ConnexionApp(ctk.CTk):
         # Raccourci touche "Entrée" pour soumettre le formulaire
         self.bind("<Return>", lambda event: self.valider_connexion())
 
+   
+    # ACTION DÉLÉGUÉE AU CONTRÔLEUR (logique métier + BDD + redirection)
+    
     def valider_connexion(self):
-        """Vérifie les identifiants dans la base de données et gère la redirection."""
-        username = self.ent_username.get().strip()
-        password = self.ent_password.get().strip()
-
-        # Validation basique des champs vides
-        if not username or not password:
-            messagebox.showwarning("Champs requis", "Veuillez remplir tous les champs.")
-            return
-
-        conn = None
-        try:
-            conn = obtenir_connexion()
-            cursor = conn.cursor(dictionary=True)
-
-            query = """
-                SELECT nom, prenom 
-                FROM Utilisateur 
-                WHERE (username = %s OR email = %s) AND mot_de_passe = %s
-            """
-            cursor.execute(query, (username, username, password))
-            utilisateur = cursor.fetchone()
-
-            cursor.close()
-            conn.close()
-
-            if utilisateur:
-                nom_complet = f"{utilisateur['prenom']} {utilisateur['nom'].upper()}"
-                
-                # --- REDIRECTION SÉCURISÉE VERS LE MENU PRINCIPAL ---
-                self.destroy() 
-                
-                from menu_app import MenuPrincipalApp
-                app = MenuPrincipalApp(nom_gestionnaire=nom_complet)
-                app.mainloop()
-            else:
-                messagebox.showerror("Authentification échouée", "Identifiant ou mot de passe incorrect.")
-
-        except Exception as e:
-            print(f"[Mode Dev / Erreur SQL] : Impossible de requêter la BDD ({e})")
-            
-            # Simulation pour le développement (identifiants par défaut : admin / admin)
-            if username == "admin" and password == "admin":
-                self.destroy()
-                from menu_app import MenuPrincipalApp
-                app = MenuPrincipalApp(nom_gestionnaire="Administrateur (Mode Dev)")
-                app.mainloop()
-            else:
-                messagebox.showerror(
-                    "Erreur de Connexion", 
-                    f"Impossible de se connecter à la base de données.\n\n"
-                    f"Astuce de test local : utilise l'identifiant 'admin' et le mot de passe 'admin' pour passer outre."
-                )
+        controleur_connexion.valider_connexion(self)
 
 if __name__ == "__main__":
     app = ConnexionApp()
