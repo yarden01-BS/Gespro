@@ -11,7 +11,7 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 
-from config_db import obtenir_connexion
+import controleur_inscription
 import theme
 
 # Configuration globale de CustomTkinter
@@ -35,9 +35,7 @@ class GesProInscriptionApp(ctk.CTk):
         self.grid_columnconfigure(1, weight=1)  # Contenu
         self.grid_rowconfigure(0, weight=1)
 
-        # =====================================================================
-        # 1. BARRE LATÉRALE (SIDEBAR)
-        # =====================================================================
+        
         self.sidebar = ctk.CTkFrame(self, width=240, corner_radius=0, fg_color=theme.BG_CARTE)
         self.sidebar.grid(row=0, column=0, sticky="nsew")
         self.sidebar.grid_rowconfigure(2, weight=1)
@@ -98,9 +96,8 @@ class GesProInscriptionApp(ctk.CTk):
         )
         self.btn_deco.grid(row=4, column=0, padx=20, pady=(0, 30), sticky="ew")
 
-        # =====================================================================
-        # 2. CONTENU PRINCIPAL
-        # =====================================================================
+        
+        
         self.main_content = ctk.CTkFrame(self, fg_color="transparent")
         self.main_content.grid(row=0, column=1, padx=25, pady=25, sticky="nsew")
         self.main_content.grid_columnconfigure(0, weight=1)
@@ -391,246 +388,23 @@ class GesProInscriptionApp(ctk.CTk):
         self.ent_email.delete(0, "end")
         self.ent_adresse.delete(0, "end")
 
+    # =====================================================================
+    # ACTIONS DÉLÉGUÉES AU CONTRÔLEUR (logique métier + BDD + mise à jour UI)
+    # Ces 4 méthodes ne font que transmettre l'instance de la fenêtre : toute
+    # la logique (lecture des champs, calculs, accès BDD, messages, mise à
+    # jour du tableau/formulaire) est implémentée dans controleur_inscription.py
+    # =====================================================================
     def rechercher_et_remplir_etudiant(self):
-        matricule = self.ent_matricule.get().strip()
-        if not matricule:
-            messagebox.showwarning("Recherche vide", "Veuillez spécifier un Matricule.")
-            return
+        controleur_inscription.rechercher_et_remplir_etudiant(self)
 
-        try:
-            conn = obtenir_connexion()
-            cursor = conn.cursor()
-            query = """
-                SELECT e.nom, e.prenom, e.age, e.email, e.addresse, f.nom, n.niveau 
-                FROM Eleve e
-                LEFT JOIN Inscription i ON e.id = i.etudiant_id
-                LEFT JOIN Programme p ON i.programme_id = p.id
-                LEFT JOIN Filiere f ON p.filiere_id = f.id
-                LEFT JOIN Niveau n ON p.niveau_id = n.id
-                WHERE e.id = %s
-                ORDER BY i.id DESC LIMIT 1
-            """
-            cursor.execute(query, (matricule,))
-            result = cursor.fetchone()
-            cursor.close()
-            conn.close()
-
-            if result:
-                self.vider_formulaire()
-                self.ent_nom.insert(0, result[0] or "")
-                self.ent_prenom.insert(0, result[1] or "")
-                
-                date_str = str(result[2]) if result[2] is not None else ""
-                try:
-                    dt = datetime.strptime(date_str, "%Y-%m-%d")
-                    date_a_afficher = dt.strftime("%d/%m/%Y")
-                except ValueError:
-                    date_a_afficher = date_str
-                
-                self.ent_date_naiss.insert(0, date_a_afficher)
-                self.ent_email.insert(0, result[3] or "")
-                self.ent_adresse.insert(0, result[4] or "")
-
-                if result[5]: self.combo_filiere.set(result[5])
-                if result[6]: self.combo_niveau.set(result[6])
-
-                messagebox.showinfo("Données importées", f"Étudiant {result[0]} {result[1]} chargé avec succès.")
-            else:
-                messagebox.showerror("Non trouvé", f"Aucun étudiant trouvé pour le Matricule {matricule}")
-        except Exception as e:
-            messagebox.showerror("Erreur", f"Erreur SQL : {e}")
-
-    # =====================================================================
-    # LOGIQUE FINANCIÈRE & BDD
-    # =====================================================================
     def effectuer_inscription(self):
-        type_op = self.combo_type.get()
-        matricule_saisi = self.ent_matricule.get().strip()
-        nom = self.ent_nom.get().strip().upper()
-        prenom = self.ent_prenom.get().strip()
-        date_naiss_saisie = self.ent_date_naiss.get().strip()
-        email = self.ent_email.get().strip()
-        addresse = self.ent_adresse.get().strip()
-        filiere = self.combo_filiere.get()
-        niveau = self.combo_niveau.get()
-        mode_paiement = self.combo_mode.get()
-
-        if not nom or not prenom or not date_naiss_saisie or not email or not addresse:
-            messagebox.showwarning("Incomplet", "Veuillez remplir tous les champs obligatoires.")
-            return
-
-        try:
-            date_formatee = datetime.strptime(date_naiss_saisie, "%d/%m/%Y").strftime("%Y-%m-%d")
-        except ValueError:
-            messagebox.showerror("Date Incorrecte", "Utilisez le format JJ/MM/AAAA (ex: 15/04/2005).")
-            return
-
-        # Application de la nouvelle grille tarifaire (10 000 FCFA hors scolarité)
-        frais_inscription_hors_scolarite = 10000
-        
-        if "Licence 1" in niveau or "BTS 1" in niveau:
-            total_scolarite = 320000
-        elif "Licence 2" in niveau or "BTS 2" in niveau:
-            total_scolarite = 370000
-        elif "Licence 3" in niveau:
-            total_scolarite = 420000
-        else:
-            total_scolarite = 320000
-
-        reste_a_payer = total_scolarite
-
-        try:
-            conn = obtenir_connexion()
-            cursor = conn.cursor()
-
-            if type_op == "Nouvelle Inscription":
-                query_etudiant = "INSERT INTO Eleve (nom, prenom, age, email, addresse) VALUES (%s, %s, %s, %s, %s)"
-                cursor.execute(query_etudiant, (nom, prenom, date_formatee, email, addresse))
-                etudiant_id = cursor.lastrowid
-            else:
-                if not matricule_saisi:
-                    messagebox.showerror("Erreur", "Matricule requis pour une réinscription.")
-                    cursor.close()
-                    conn.close()
-                    return
-                etudiant_id = int(matricule_saisi)
-                query_update = "UPDATE Eleve SET nom=%s, prenom=%s, age=%s, email=%s, addresse=%s WHERE id=%s"
-                cursor.execute(query_update, (nom, prenom, date_formatee, email, addresse, etudiant_id))
-
-            query_prog = """
-                SELECT p.id FROM Programme p
-                JOIN Filiere f ON p.filiere_id = f.id
-                JOIN Niveau n ON p.niveau_id = n.id
-                WHERE f.nom = %s AND n.niveau = %s
-            """
-            cursor.execute(query_prog, (filiere, niveau))
-            result_prog = cursor.fetchone()
-            if not result_prog:
-                messagebox.showerror("Erreur", f"Le programme {filiere} ({niveau}) n'est pas paramétré.")
-                cursor.close()
-                conn.close()
-                return
-            programme_id = result_prog[0]
-
-            cursor.execute("SELECT id, libelle FROM Annee_academique WHERE statut = 'Active'")
-            result_annee = cursor.fetchone()
-            if not result_annee:
-                messagebox.showerror("Erreur", "Aucune année académique active trouvée.")
-                cursor.close()
-                conn.close()
-                return
-            annee_id, annee_libelle = result_annee[0], result_annee[1]
-
-            query_ins = """
-                INSERT INTO Inscription (etudiant_id, programme_id, annee_academique_id, date_inscription, type_inscription)
-                VALUES (%s, %s, %s, %s, %s)
-            """
-            cursor.execute(query_ins, (etudiant_id, programme_id, annee_id, date.today().strftime('%Y-%m-%d'), type_op))
-            inscription_id = cursor.lastrowid
-
-            query_pay = "INSERT INTO Paiement (inscription_id, montant, datePaiement, modePaiement) VALUES (%s, %s, %s, %s)"
-            cursor.execute(query_pay, (inscription_id, frais_inscription_hors_scolarite, date.today().strftime('%Y-%m-%d'), mode_payment := mode_paiement))
-
-            conn.commit()
-            cursor.close()
-            conn.close()
-
-            infos_recu = {
-                'matricule': str(etudiant_id),
-                'nom': nom,
-                'prenom': prenom,
-                'date_naiss': date_naiss_saisie,
-                'email': email,
-                'adresse': addresse,
-                'filiere': filiere,
-                'niveau': niveau,
-                'annee': annee_libelle,
-                'type': type_op,
-                'mode': mode_paiement,
-                'montant': f"{frais_inscription_hors_scolarite:,} FCFA".replace(",", " "),
-                'reste': f"{reste_a_payer:,} FCFA".replace(",", " "),
-                'total_scolarite': f"{total_scolarite:,} FCFA".replace(",", " "),
-                'date': date.today().strftime('%d/%m/%Y')
-            }
-            
-            self.generer_pdf_fiche_inscription(infos_recu)
-            messagebox.showinfo("Succès", f"Opération validée.\nMatricule étudiant : {etudiant_id}")
-            
-            self.charger_etudiants_table()
-            self.vider_formulaire()
-            if type_op == "Réinscription": self.ent_matricule.delete(0, "end")
-
-        except Exception as e:
-            messagebox.showerror("Erreur", f"Erreur d'enregistrement BDD : {e}")
+        controleur_inscription.effectuer_inscription(self)
 
     def charger_etudiants_table(self):
-        for item in self.tree.get_children(): self.tree.delete(item)
-        filiere_filtre = self.filter_filiere.get()
-        niveau_filtre = self.filter_niveau.get()
-
-        try:
-            conn = obtenir_connexion()
-            cursor = conn.cursor()
-            query = """
-                SELECT e.id, e.nom, e.prenom, e.age, e.email, e.addresse, f.nom, n.niveau, i.type_inscription
-                FROM Eleve e
-                JOIN Inscription i ON e.id = i.etudiant_id
-                JOIN Programme p ON i.programme_id = p.id
-                JOIN Filiere f ON p.filiere_id = f.id
-                JOIN Niveau n ON p.niveau_id = n.id
-                WHERE 1=1
-            """
-            params = []
-            if filiere_filtre != "Toutes":
-                query += " AND f.nom = %s"; params.append(filiere_filtre)
-            if niveau_filtre != "Tous":
-                query += " AND n.niveau = %s"; params.append(niveau_filtre)
-
-            query += " ORDER BY f.nom ASC, n.niveau ASC, e.nom ASC"
-            cursor.execute(query, tuple(params))
-            lignes = cursor.fetchall()
-            cursor.close()
-            conn.close()
-
-            for l in lignes:
-                raw_date = l[3] or ""
-                try:
-                    date_affichage = datetime.strptime(raw_date, "%Y-%m-%d").strftime("%d/%m/%Y")
-                except ValueError:
-                    date_affichage = raw_date
-
-                self.tree.insert("", "end", values=(l[0], l[1], l[2], date_affichage, l[4], l[5], l[6], l[7], l[8]))
-        except Exception as e:
-            messagebox.showerror("Erreur", f"Impossible de charger le tableau : {e}")
+        controleur_inscription.charger_etudiants_table(self)
 
     def retirer_inscription(self):
-        selection = self.tree.selection()
-        if not selection:
-            messagebox.showwarning("Sélection requise", "Sélectionnez un étudiant dans le tableau.")
-            return
-
-        item_vals = self.tree.item(selection[0], 'values')
-        matricule = item_vals[0]
-        nom_complet = f"{item_vals[1]} {item_vals[2]}"
-
-        if messagebox.askyesno("Confirmation", f"Voulez-vous retirer l'inscription de {nom_complet} ?"):
-            try:
-                conn = obtenir_connexion()
-                cursor = conn.cursor()
-                cursor.execute("""
-                    DELETE p FROM Paiement p
-                    INNER JOIN Inscription i ON p.inscription_id = i.id
-                    WHERE i.etudiant_id = %s
-                """, (matricule,))
-                cursor.execute("DELETE FROM Inscription WHERE etudiant_id = %s", (matricule,))
-                conn.commit()
-                cursor.close()
-                conn.close()
-
-                messagebox.showinfo("Succès", "Inscription annulée.")
-                self.charger_etudiants_table()
-            except Exception as e:
-                messagebox.showerror("Erreur", f"Impossible de révoquer l'inscription : {e}")
+        controleur_inscription.retirer_inscription(self)
 
     # =====================================================================
     # CONCEPTION DU REÇU : LOOK MODERNE & FINTECH (HUMAIN ET PRO)
