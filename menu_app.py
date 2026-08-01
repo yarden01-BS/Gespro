@@ -97,13 +97,13 @@ class MenuPrincipalApp(ctk.CTk):
 
     def ouvrir_inscriptions(self):
         self.destroy() # Ferme le menu
-        from inscription_app import GesProInscriptionApp
+        from vue_inscription import GesProInscriptionApp
         app = GesProInscriptionApp()
         app.mainloop()
 
     def ouvrir_paiements(self):
         self.destroy() # Ferme le menu
-        from theme import GesProPaiementApp
+        from vue_paiement import GesProPaiementApp
         app = GesProPaiementApp()
         app.mainloop()
 
